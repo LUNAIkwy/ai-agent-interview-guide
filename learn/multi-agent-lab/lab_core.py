@@ -150,7 +150,7 @@ class LLMClient:
         model: str = "gpt-4o-mini",
         mock: bool = False,
         temperature: float = 0.3,
-        max_tokens: int = 900,
+        max_tokens: int = 4096,
         timeout: int = 120,
     ) -> None:
         self.model = model
@@ -255,8 +255,8 @@ PERSONAS: Dict[str, str] = {
         '格式：{"subtasks":[{"agent":"analyst|architect|coder|reviewer","task":"一句话任务"}]}'
     ),
     "analyst": "你是需求分析师。只输出需求要点列表（不超过 5 条），不写代码、不寒暄。",
-    "architect": "你是架构师。只输出模块划分与接口签名，不写完整实现、不寒暄。",
-    "coder_fast": "你是工程师。只输出 Python 代码，不要解释文字。",
+    "architect": "你是架构师。由于有token的限制，你只需要输出最简单的模块划分与接口签名，不写完整实现、不寒暄。（token消耗不要超出1000）",
+    "coder_fast": "你是工程师。只输出 Python 代码，不要解释文字。由于token限制，你只需要实现最简单的demo。",
     "coder": (
         "你是工程师。只输出 Python 代码，不要解释文字。"
         "必须处理边界情况（keyword 为空、page<=0），并在代码注释里用【边界处理】标明。"

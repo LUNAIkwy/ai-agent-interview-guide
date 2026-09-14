@@ -29,7 +29,7 @@ from lab_core import (
 )
 
 GOAL = "给订单系统加一个按关键词搜索订单的接口，支持分页，且不得返回手机号"
-RETRY_BUDGET = 1
+RETRY_BUDGET = 3
 
 
 def parse_plan(raw: str) -> list:
@@ -75,9 +75,9 @@ def main() -> None:
     print("\n[2] 流水线产出（analyst -> architect -> coder）")
     artifacts["analyst"] = client.chat(PERSONAS["analyst"], context(GOAL, artifacts), tag="analyst")
     artifacts["architect"] = client.chat(PERSONAS["architect"], context(GOAL, artifacts), tag="architect")
+    print("ARCHITECT RAW:", repr(artifacts["architect"]))
     # 关键设计：初稿故意用「快速版」人设，不强调边界处理 —— 否则质检门就没意义了
-    artifacts["coder"] = client.chat(PERSONAS["coder"], context(GOAL, artifacts), tag="coder")
-
+    artifacts["coder"] = client.chat(PERSONAS["coder_fast"], context(GOAL, artifacts), tag="coder")
     print("\n[3] 质检门：reviewer 只认证据，不认声明")
     verdict = review(client, tracer, GOAL, artifacts)
     print(f"     -> 结构化结论：{verdict}")

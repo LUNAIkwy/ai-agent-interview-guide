@@ -8,12 +8,12 @@ dist/
 build/
 .eggs/
 *.egg
+.openai
 .venv/
 venv/
 env/
 .env
 .ruff_cache/
-
 # Java
 target/
 *.class
