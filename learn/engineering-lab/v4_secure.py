@@ -293,7 +293,7 @@ def scenario_e(tracer) -> None:
 
 def main() -> None:
     banner("V4｜安全与权限：把模型当成不可信输入",
-           [live_hint(False), "结构：输入扫描 -> 工具白名单 -> schema 校验 -> 两步授权 -> 输出过滤 -> 审计"])
+           [live_hint(False, "本版可接真实模型；但场景 B 的「模型照做」不一定复现 —— 这正是它不可信的原因"), "结构：输入扫描 -> 工具白名单 -> schema 校验 -> 两步授权 -> 输出过滤 -> 审计"])
     set_log(False)
     gw = build_gateway()
     gw.vendors["vendorA"] = FakeVendor("vendorA", faults=(("ok", 1.0),), seed=7, latency_scale=0.4)

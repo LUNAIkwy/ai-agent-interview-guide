@@ -337,7 +337,7 @@ def scenario_e() -> None:
 
 def main() -> None:
     banner("V6｜部署与运维：健康检查 -> 金丝雀 -> 版本化 -> 优雅停机",
-           [live_hint(False), "结构：探针 + 灰度权重 + SLO 判断 + 自动回滚 + checkpoint"])
+           [live_hint(False, "本版指标要可复现（SLO 必须被触发），固定用假供应商"), "结构：探针 + 灰度权重 + SLO 判断 + 自动回滚 + checkpoint"])
     set_log(False)
     LEDGER.reset()
     scenario_a()

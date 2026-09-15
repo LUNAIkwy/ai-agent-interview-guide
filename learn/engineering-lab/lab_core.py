@@ -1046,10 +1046,14 @@ class Gateway:
                  registry: Optional[Dict[str, ModelSpec]] = None, max_retries: int = 3,
                  base_delay: float = 0.3, cap_delay: float = 4.0,
                  breaker_kwargs: Optional[Dict[str, Any]] = None, record_ledger: bool = True,
-                 tracer: Optional[Tracer] = None) -> None:
+                 tracer: Optional[Tracer] = None, pin_model: Optional[str] = None) -> None:
         self.vendors = vendors
         self.policy = policy
         self.registry = registry or MODELS
+        # pin_model：把主模型锁死（--live 用它锁住真实模型）。
+        # 不锁的话，「成本优先」会自动选到价格为 0 的自托管假供应商，
+        # 你会以为在调真实模型，其实一次都没调出去。
+        self.pin_model = pin_model
         self.max_retries = max_retries
         self.base_delay = base_delay
         self.cap_delay = cap_delay
@@ -1080,6 +1084,10 @@ class Gateway:
         """
         policy = policy or self.policy
         primary, _ = route(task, policy, self.registry)
+        if self.pin_model:
+            pinned = [s for s in self.registry.values() if s.model_id == self.pin_model]
+            if pinned:
+                primary = pinned[0]
         rest = [
             s for s in self.registry.values()
             if s is not primary
@@ -1204,8 +1212,11 @@ def build_gateway(policy: str = "cost_first", live: bool = False,
                   **kwargs: Any) -> Gateway:
     """一行拿到「配好路由表 + 供应商池」的网关。"""
     use_live = live or has_flag("--live")
-    return Gateway(build_vendors(use_live), policy=policy,
-                   registry=live_registry() if use_live else MODELS, **kwargs)
+    if use_live and live_available():
+        # 真实模型当主候选；假供应商留在降级链尾部兜底（真挂了你会看到 degraded=True）
+        kwargs.setdefault("pin_model", env("LLM_MODEL", "gpt-4o-mini"))
+        return Gateway(build_vendors(True), policy=policy, registry=live_registry(), **kwargs)
+    return Gateway(build_vendors(False), policy=policy, registry=MODELS, **kwargs)
 
 
 # ===========================================================================
@@ -1367,10 +1378,15 @@ def banner(title: str, subtitle: Sequence[str] = ()) -> None:
     print()
 
 
-def live_hint(live: bool) -> str:
+def live_hint(live: bool, note: str = "") -> str:
+    """横幅上那句话。note 用来纠正「这一版其实不接真实模型」的误期待。"""
     if (live or has_flag("--live")) and live_available():
-        return f"真实模型：{env('LLM_MODEL', 'gpt-4o-mini')} @ {env('LLM_BASE_URL', DEFAULT_BASE_URL)}"
-    return "离线假供应商（想调真实模型：加 --live，并在 .env 里配好 LLM_API_KEY）"
+        line = f"真实模型：{env('LLM_MODEL', 'gpt-4o-mini')} @ {env('LLM_BASE_URL', DEFAULT_BASE_URL)}"
+    elif (live or has_flag("--live")):
+        line = "要了 --live 但没读到 LLM_API_KEY，本次仍走离线假供应商"
+    else:
+        line = "离线假供应商（想调真实模型：加 --live，并在 .env 里配好 LLM_API_KEY）"
+    return f"{line}；{note}" if note else line
 
 
 def bullets(items: Iterable[str], indent: int = 4) -> None:

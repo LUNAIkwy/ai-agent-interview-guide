@@ -45,7 +45,7 @@ FAULTS = ["ok", "ok", "429", "ok", "timeout", "ok", "ok", "500", "ok", "401"]
 
 def main() -> None:
     banner("V1｜裸奔版：没有重试 / 没有熔断 / 没有降级 / 没有记账 / 没有 trace",
-           [live_hint(False),
+           [live_hint(False, "本版是反例：故障按剧本发生，所以固定用假供应商"),
             "供应商：vendorA（按剧本报错：429 -> 超时 -> 500 -> 401）",
             "模型：cheap-mini（最便宜那个，因为「先跑起来再说」）"])
 

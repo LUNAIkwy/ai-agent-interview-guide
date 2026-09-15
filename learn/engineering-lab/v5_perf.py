@@ -328,7 +328,7 @@ def warm_cache_note() -> None:
 def main() -> None:
     concurrency = arg_int("--concurrency", 3)
     banner("V5｜性能：并行的收益、限流的必要性、缓存分层、流式首字",
-           [live_hint(False), f"本文件用真实时间（约 2~3 秒跑完），并发上限 = {concurrency}"])
+           [live_hint(False, "本版要量真实耗时与并发上限，固定用假供应商"), f"本文件用真实时间（约 2~3 秒跑完），并发上限 = {concurrency}"])
     set_log(False)
     try:
         scenario_a()

@@ -246,7 +246,7 @@ def scenario_e() -> None:
 
 def main() -> None:
     banner("V2｜路由 + 重试退避 + 熔断 + 降级：让用户不再看见 500",
-           [live_hint(False), "结构：Provider Adapter -> 路由 -> 熔断 -> 重试 -> 降级链 -> 记账"])
+           [live_hint(False, "本版故障要可复现（第 3 个请求必须 429），固定用假供应商；想看真实模型跑 v3"), "结构：Provider Adapter -> 路由 -> 熔断 -> 重试 -> 降级链 -> 记账"])
     scenario_a()
     scenario_b()
     scenario_c()
