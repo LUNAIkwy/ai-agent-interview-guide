@@ -36,6 +36,11 @@ from lab_core import (
 
 GOAL = "给订单系统加一个按关键词搜索订单的接口，支持分页，且不得返回手机号"
 
+# 门禁（reviewer）必须看到完整产物。
+# 拿一段被截断的代码去送审，等于「没有证据」—— 真实模型会直接回一句
+# 「代码在 xxx 处被截断，无法确认」，于是场景 B 永远收敛不了。
+VIEW_LIMIT = 6000
+
 
 def _loop_under_guard(client, guard, critic_persona, critic_tag, ask: str = "请复审。"):
     """V3 的那个死循环，一字不改，只是外面套了 Guard。"""
@@ -101,7 +106,7 @@ def scenario_b(client) -> None:
     for attempt in (1, 2):
         out = client.chat(
             PERSONAS["reviewer"],
-            f"总目标：{GOAL}\n待审产物：\n{clip(code, 600)}\n\n请给出审查结论。",
+            f"总目标：{GOAL}\n待审产物：\n{clip(code, VIEW_LIMIT)}\n\n请给出审查结论。",
             tag="reviewer",
         )
         verdict = extract_verdict(out)
@@ -112,7 +117,7 @@ def scenario_b(client) -> None:
         state.move("EXEC")
         code = client.chat(
             PERSONAS["coder"],
-            f"总目标：{GOAL}\n审查意见：{clip(out, 300)}\n\n请修改。必须附上边界处理的证据。",
+            f"总目标：{GOAL}\n审查意见：{clip(out, VIEW_LIMIT)}\n\n请修改。必须附上边界处理的证据。",
             tag="coder-rework",
         )
         tracer.log("exec", "author", f"rework#{attempt}")

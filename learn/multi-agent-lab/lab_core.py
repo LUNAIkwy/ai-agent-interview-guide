@@ -78,25 +78,30 @@ class Usage:
     calls: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    # 推理模型的「思考」token 也算在 completion_tokens 里，必须单独看得见
+    reasoning_tokens: int = 0
 
     @property
     def tokens(self) -> int:
         return self.prompt_tokens + self.completion_tokens
 
-    def add(self, prompt_tokens: int, completion_tokens: int) -> None:
+    def add(self, prompt_tokens: int, completion_tokens: int, reasoning_tokens: int = 0) -> None:
         self.calls += 1
         self.prompt_tokens += prompt_tokens
         self.completion_tokens += completion_tokens
+        self.reasoning_tokens += reasoning_tokens
 
     def reset(self) -> None:
         self.calls = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
+        self.reasoning_tokens = 0
 
     def report(self) -> str:
+        thinking = f"（其中思考 {self.reasoning_tokens}）" if self.reasoning_tokens else ""
         return (
             f"调用 {self.calls} 次 | 输入 {self.prompt_tokens} + 输出 "
-            f"{self.completion_tokens} = {self.tokens} tokens"
+            f"{self.completion_tokens}{thinking} = {self.tokens} tokens"
         )
 
 
@@ -151,12 +156,14 @@ class LLMClient:
         mock: bool = False,
         temperature: float = 0.3,
         max_tokens: int = 4096,
+        thinking: bool = False,
         timeout: int = 120,
     ) -> None:
         self.model = model
         self.mock = mock
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.thinking = thinking
         self.base_url = base_url or DEFAULT_BASE_URL
         self._cli: Optional[OpenAI] = None
         if not mock:
@@ -173,21 +180,23 @@ class LLMClient:
         return "mock(离线兜底)" if self.mock else self.model
 
     def chat(self, system: str, user: str, tag: str = "agent", verbose: bool = True) -> str:
+        reasoning = 0
         if self.mock:
             text, pt, ct = mock_reply(tag, system, user)
         else:
-            text, pt, ct = self._live_chat(system, user)
-        USAGE.add(pt, ct)
+            text, pt, ct, reasoning = self._live_chat(system, user)
+        USAGE.add(pt, ct, reasoning)
         if verbose:
             print(f"  -- [{tag}] {self.label}")
             print(f"     入参: {clip(user, 140)}")
             lines = text.strip().splitlines() or [""]
             for i, line in enumerate(lines):
                 print(f"     出参: {line}" if i == 0 else f"           {line}")
-            print(f"     用量: {pt} + {ct} tokens")
+            thinking = f"（其中思考 {reasoning}）" if reasoning else ""
+            print(f"     用量: {pt} + {ct}{thinking} tokens")
         return text
 
-    def _live_chat(self, system: str, user: str) -> Tuple[str, int, int]:
+    def _live_chat(self, system: str, user: str) -> Tuple[str, int, int, int]:
         kwargs: Dict[str, Any] = {
             "model": self.model,
             "messages": [
@@ -197,23 +206,52 @@ class LLMClient:
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
         }
-        try:
-            resp = self._cli.chat.completions.create(**kwargs)  # type: ignore[union-attr]
-        except Exception as exc:
-            msg = str(exc)
-            # 有些新模型只认 max_completion_tokens，这里做一次兼容回退
-            if "max_tokens" in msg and "max_completion_tokens" in msg:
-                kwargs.pop("max_tokens", None)
-                kwargs["max_completion_tokens"] = self.max_tokens
-                resp = self._cli.chat.completions.create(**kwargs)  # type: ignore[union-attr]
-            else:
-                raise LLMError(f"调用模型失败：{msg[:400]}") from exc
+        if not self.thinking:
+            # 关掉「思考」：推理 token 和正文抢同一个 max_tokens 预算，
+            # 思考写满预算时 content 会直接返回空字符串。见 README「常见报错」。
+            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
 
-        text = (resp.choices[0].message.content or "").strip()
+        resp = self._create(kwargs)
+        choice = resp.choices[0]
+        message = choice.message
+        text = (message.content or "").strip()
+        reasoning = str(getattr(message, "reasoning_content", "") or "").strip()
+
+        if not text and reasoning:
+            print(f"     [警告] {self.model} 这次只写了思考、没有正文（finish_reason={choice.finish_reason}）")
+            print("            原因：思考 token 吃光了 max_tokens 预算。已临时回退用 reasoning_content。")
+            print("            正规解法：LLM_THINKING=off 关掉思考，或把 LLM_MAX_TOKENS 调大。")
+            text = reasoning
+        if not text:
+            raise LLMError(
+                f"模型返回空内容（finish_reason={choice.finish_reason}）。"
+                f" 若是推理模型，请设 LLM_THINKING=off 或调大 LLM_MAX_TOKENS（当前 {self.max_tokens}）。"
+            )
+
         usage = getattr(resp, "usage", None)
         pt = getattr(usage, "prompt_tokens", None) or est_tokens(system + user)
         ct = getattr(usage, "completion_tokens", None) or est_tokens(text)
-        return text, int(pt), int(ct)
+        details = getattr(usage, "completion_tokens_details", None)
+        rt = getattr(details, "reasoning_tokens", None) or 0
+        return text, int(pt), int(ct), int(rt)
+
+    def _create(self, kwargs: Dict[str, Any]):
+        """真正发请求，顺手处理两个兼容回退。"""
+        try:
+            return self._cli.chat.completions.create(**kwargs)  # type: ignore[union-attr]
+        except Exception as exc:
+            msg = str(exc)
+            # 兼容一：有些新模型只认 max_completion_tokens
+            if "max_tokens" in msg and "max_completion_tokens" in msg:
+                kwargs.pop("max_tokens", None)
+                kwargs["max_completion_tokens"] = self.max_tokens
+                return self._cli.chat.completions.create(**kwargs)  # type: ignore[union-attr]
+            # 兼容二：服务端不认 thinking 开关，去掉再来一次
+            if "extra_body" in kwargs and ("thinking" in msg or "extra_body" in msg):
+                kwargs.pop("extra_body", None)
+                print(f"     [提示] {self.model} 不支持 thinking 开关，按服务端默认继续。")
+                return self._cli.chat.completions.create(**kwargs)  # type: ignore[union-attr]
+            raise LLMError(f"调用模型失败：{msg[:400]}") from exc
 
 
 def build_client(role: str = "default", mock: bool = False) -> LLMClient:
@@ -232,9 +270,19 @@ def build_client(role: str = "default", mock: bool = False) -> LLMClient:
     decision_roles = {"boss", "reviewer", "critic", "critic_chatty", "default"}
     model = (smart or default_model) if role in decision_roles else (fast or default_model)
 
+    # 生成参数：demo 里给足但别放开，思考默认关掉（详见 .env.example）
+    max_tokens = int(env("LLM_MAX_TOKENS", "4096") or 4096)
+    thinking = env("LLM_THINKING", "off").lower() not in ("off", "false", "0", "no", "")
+
     if mock or has_flag("--mock") or not api_key:
         return LLMClient(model=model, mock=True)
-    return LLMClient(api_key=api_key, base_url=base_url, model=model)
+    return LLMClient(
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        max_tokens=max_tokens,
+        thinking=thinking,
+    )
 
 
 def banner(title: str, client: LLMClient) -> None:
@@ -245,6 +293,7 @@ def banner(title: str, client: LLMClient) -> None:
         print("      想看真实模型：复制 .env.example 为 .env 并填入 Key")
     else:
         print(f"模型：真实 API -> {client.model}  @ {client.base_url}")
+        print(f"生成参数：max_tokens={client.max_tokens} | 思考={'on' if client.thinking else 'off'}")
     print("=" * 70)
 # ===========================================================================
 # 4. 角色人设（system prompt）

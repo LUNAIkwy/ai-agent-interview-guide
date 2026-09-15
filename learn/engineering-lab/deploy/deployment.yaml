@@ -1,0 +1,98 @@
+# 文档 5.5 的 Deployment 骨架，补上探针、资源、优雅停机与灰度要点。
+#
+# 跑起来看看效果：kubectl apply -f deploy/deployment.yaml
+# 灰度与回滚在 v6_release.py 里有可运行的模拟（含 SLO 判断与自动回滚）。
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-api
+  labels:
+    app: agent-api
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0        # 宁可多起一个 Pod，也别让可用数掉下去
+  selector:
+    matchLabels:
+      app: agent-api
+  template:
+    metadata:
+      labels:
+        app: agent-api
+        # 版本标签：镜像 tag / Prompt 版本 / 模型名 都要能对得上（文档 5.2.5）
+        version: v20260401
+    spec:
+      # 长任务要留足时间：优雅停机 = 先停止接新请求，再把手上这单做完
+      terminationGracePeriodSeconds: 90
+      containers:
+        - name: api
+          image: your-registry/agent-api:v20260401   # 别用 latest，回滚要靠它
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: llm-keys                        # 密钥来自 Secret，不进镜像
+            - configMapRef:
+                name: agent-config                    # 路由表 / 开关 / Prompt 版本
+          resources:
+            requests: {cpu: "500m", memory: "1Gi"}
+            limits: {cpu: "2", memory: "2Gi"}
+          # 就绪：能接流量吗？依赖不通就摘流量（别重启）
+          readinessProbe:
+            httpGet: {path: /ready, port: 8000}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          # 探活：进程还活着吗？绝不依赖下游，否则下游抖动会导致全体重启
+          livenessProbe:
+            httpGet: {path: /live, port: 8000}
+            initialDelaySeconds: 30      # 冷启动慢（加载模型/连向量库）就给足
+            periodSeconds: 10
+            failureThreshold: 3
+---
+# 金丝雀：同一套镜像，把 5% 的流量先给它（V6 场景 B 是它的可运行版本）
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent-api-canary
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: agent-api, track: canary}
+  template:
+    metadata:
+      labels:
+        app: agent-api
+        track: canary
+        version: v20260402
+    spec:
+      containers:
+        - name: api
+          image: your-registry/agent-api:v20260402
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef: {name: llm-keys}
+          readinessProbe:
+            httpGet: {path: /ready, port: 8000}
+---
+# 自动扩缩容：CPU 只是下限，Agent 服务更该看队列长度与 P95（需 Prometheus Adapter）
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: agent-api
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: agent-api}
+  minReplicas: 2
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+    # - type: Pods
+    #   pods:
+    #     metric: {name: request_queue_length}
+    #     target: {type: AverageValue, averageValue: "5"}

@@ -62,7 +62,7 @@ python run_all.py
 
 | 版本 | 结构 | 隐喻 | 治什么 / 暴露什么 |
 |---|---|---|---|
-| `v1_pipeline.py` | 流水线 + 共享黑板 | 工厂流水线 | 上下文被切短后每个 Agent 更聚焦；但错误会逐级传递，且**没法退回第一步** |
+| `v1_pipeline.py` | 流水线 + 共享黑板 | 工厂流水线 | 上下文被切短后每个 Agent 更聚焦；但错误会逐级传递，且**没法退回第一步**。文件末尾附了个**黑板并发实验**（锁 vs 版本号） |
 | `v2_boss_worker.py` | Boss-Worker（中心化） | 项目经理派活 | Boss 拆任务、质检、**带证据要求地打回重做**；代价是 Boss 成为单点 |
 | `v3_deadloop.py` | 民主讨论**没有护栏** | 开会开不完 | 故意做崩：**死循环 + Token 肉眼可见地烧** |
 | `v4_guarded.py` | 四道刹车 + 状态机 + trace | 给系统装安全阀 | 怎么检测死循环、怎么用证据让流程收敛 |
@@ -99,10 +99,10 @@ python run_all.py
 |---|---|
 | 第 1 节 为什么需要多智能体 | V1 的「拆上下文」、V0 单 Agent 反例 |
 | 第 2 节 三大协作模式 | V1 流水线、V2 Boss-Worker、V3 民主讨论 |
-| 第 3 节 通信机制 | V1 的 `Blackboard` 类（共享黑板） |
+| 第 3 节 通信机制 | V1 的 `Blackboard` 类（共享黑板）+ 末尾的并发实验（锁 vs 版本号） |
 | 第 4 节 任务分配 | V2 里 Boss 生成的 `subtasks` |
 | 第 5 节 冲突解决 | V2/V4 的「证据门槛」与 reviewer 仲裁 |
-| 第 6 节 状态管理与同步 | V4 的 `TaskState` 状态机 |
+| 第 6 节 状态管理与同步 | V4 的 `TaskState` 状态机；V1 的 `VersionedBlackboard`（乐观锁 / CAS） |
 | 第 8 节 企业应用 | V2 的 FAST/SMART 模型分工 |
 | 第 9 节 生产挑战 | V3（死循环 + 烧钱）、V4（四道刹车 + trace） |
 | 附 Q14 死循环检测 | `Guard.RULES` 那四行 |
@@ -134,7 +134,14 @@ python run_all.py
 | `openai.NotFoundError` | `LLM_MODEL` 名字不对，或 `LLM_BASE_URL` 少了 `/v1` |
 | `openai.APIConnectionError` | 网络或代理问题；本地服务先确认端口通了 |
 | 报 `max_completion_tokens` 相关错误 | 代码已做兼容回退；若仍失败，换一个模型试 |
+| 某个 Agent（常见是 `coder`）**输出为空** | 用的是推理模型：思考 token 和正文抢同一个 `max_tokens`，思考写满预算后 `content` 就是空串。把 `.env` 里的 `LLM_THINKING` 设成 `off`（默认值），或把 `LLM_MAX_TOKENS` 调大 |
 | V3 真的在烧钱 | 意料之中，它就是要让你看见这个。用 `--max-rounds 4` 限流 |
+
+> **关于「思考」**：推理模型（DeepSeek 的 `deepseek-v4-flash` 之类）会先写一段
+> `reasoning_content` 再写正文，两段**共用一个输出预算**。预算被思考吃光时，
+> `content` 不是报错、而是**安静地返回空字符串** —— 于是 coder 交了份白卷，
+> 下游所有 Agent 跟着一起空转。这就是本实验默认 `LLM_THINKING=off` 的原因。
+> 想亲眼看这笔账，把它改成 `on` 再跑 V3：账本里的「其中思考 N」就是纯烧掉的那部分。
 
 ---
 

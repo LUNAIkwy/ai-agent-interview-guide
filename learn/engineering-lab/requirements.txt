@@ -1,0 +1,15 @@
+# 这个 lab 默认「离线假供应商」，所以标准库就够了 —— 不装任何依赖也能跑通 V1~V7。
+#
+# 只有下面两种情况才需要装：
+#   1) 想用真实模型跑（python xxx.py --live）
+#   2) 想用第三方库做 schema 校验（不装的话 guard_kit 会自动降级到内置 mini 校验器）
+#
+# pip install -r requirements.txt
+
+# --- --live 必需 ---
+openai>=1.40.0
+python-dotenv>=1.0.0
+
+# --- 可选：装了就用，没装自动降级 ---
+# tiktoken>=0.7.0      # 更准的 token 估算（没装则用「中文 1 字 1 token」的估算）
+# jsonschema>=4.20.0   # 工具参数校验用官方库（没装则用 guard_kit 里的 mini 校验器）
